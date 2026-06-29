@@ -18,7 +18,14 @@
       "Write",
       "Edit",
       "Glob",
-      "Grep"
+      "Grep",
+      "mcp__plugin_engram_engram__mem_search",
+      "PowerShell(python --version 2>&1; python3 --version 2>&1)",
+      "PowerShell(pip install *)",
+      "PowerShell(python -c \"import fastapi, uvicorn, anthropic, httpx, dotenv, sqlalchemy, yaml, aiosqlite; print\\('Todas las dependencias instaladas correctamente'\\)\")",
+      "PowerShell(if \\(-not \\(Test-Path \".env\"\\)\\) { Copy-Item \".env.example\" \".env\"; Write-Host \".env creado desde .env.example\" } else { Write-Host \".env ya existe\" })",
+      "PowerShell(python -c \"from agent.brain import generar_respuesta; from agent.memory import inicializar_db; from agent.providers import obtener_proveedor; from agent.tools import calcular_costo_pedido; print\\('Todos los módulos importados correctamente'\\)\")",
+      "PowerShell(docker --version 2>&1)"
     ]
   }
 }

@@ -1,0 +1,24 @@
+# Configuración del negocio — Generado por AgentKit
+negocio:
+  nombre: "Madecentro Melamine"
+  descripcion: >
+    Ferretería especializada en cortes de melamina. Atendemos principalmente
+    a carpinteros que necesitan piezas cortadas a medida. El servicio incluye
+    corte recto, canteado (delgado y grueso) y ranurado de tableros de melamina.
+  horario: "Lunes a Viernes 9am a 6pm"
+  operacion_24h: true
+
+agente:
+  nombre: "Madecentro Bot"
+  tono: "Profesional y formal"
+  casos_de_uso:
+    - "Tomar pedidos de corte de melamina con medidas detalladas"
+    - "Traducir el lenguaje del carpintero al formato técnico de la ferretería"
+    - "Calcular costos estimados de corte, canteado y ranurado"
+    - "Validar piezas y resolver ambigüedades antes de confirmar el pedido"
+    - "Generar tabla de corte lista para enviar a la ferretería"
+
+metadata:
+  creado: "2026-06-29"
+  version: "1.0"
+  proveedor_whatsapp: "twilio"
