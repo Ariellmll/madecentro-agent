@@ -1,9 +1,12 @@
 # agent/memory.py — Memoria de conversaciones con SQLite
 import os
 from datetime import datetime, date
+from zoneinfo import ZoneInfo
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy import String, Text, DateTime, select, Integer, func
+
+_ZONA_LIMA = ZoneInfo("America/Lima")
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -110,7 +113,11 @@ async def obtener_nombre_cliente(telefono: str) -> str:
 
 
 async def crear_numero_orden(telefono: str) -> str:
-    hoy = date.today()
+    # Usar hora Lima para que el contador diario se resetee a medianoche Lima, no UTC
+    ahora_lima = datetime.now(_ZONA_LIMA)
+    hoy = ahora_lima.date()
+    # Guardar como naive datetime en hora Lima (SQLite no maneja tz)
+    ahora_naive = ahora_lima.replace(tzinfo=None)
     async with async_session() as session:
         result = await session.execute(
             select(func.count(Orden.id)).where(
@@ -119,7 +126,7 @@ async def crear_numero_orden(telefono: str) -> str:
         )
         count = (result.scalar() or 0) + 1
         numero = f"OC-{hoy.strftime('%Y%m%d')}-{count:03d}"
-        orden = Orden(telefono=telefono, numero_orden=numero, fecha_creacion=datetime.utcnow())
+        orden = Orden(telefono=telefono, numero_orden=numero, fecha_creacion=ahora_naive)
         session.add(orden)
         await session.commit()
         return numero

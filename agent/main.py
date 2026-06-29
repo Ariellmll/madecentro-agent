@@ -4,6 +4,7 @@ import re
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import PlainTextResponse
 from dotenv import load_dotenv
@@ -28,6 +29,8 @@ PORT = int(os.getenv("PORT", 8000))
 # Número que recibe la orden confirmada (mismo que Yape/Plin de la ferretería)
 PAYMENT_PHONE_NUMBER = os.getenv("PAYMENT_PHONE_NUMBER", "")
 
+_ZONA_LIMA = ZoneInfo("America/Lima")
+
 _PATRON_NOMBRE = re.compile(r'\[CLIENTE_NOMBRE:\s*(.+?)\]')
 _PATRON_ORDEN = re.compile(r'\[ORDEN_CORTE\](.*?)\[/ORDEN_CORTE\]', re.DOTALL)
 
@@ -45,7 +48,7 @@ def _extraer_cuerpo_orden(respuesta: str) -> str | None:
 
 
 def _formatear_orden_ferreteria(cuerpo: str, telefono: str, nombre: str, numero_orden: str) -> str:
-    ahora = datetime.now()
+    ahora = datetime.now(_ZONA_LIMA)
     hora = ahora.strftime('%I:%M').lstrip('0') or '12'
     sufijo = 'a.m.' if ahora.hour < 12 else 'p.m.'
     fecha_str = f"{ahora.strftime('%d/%m/%Y')} {hora} {sufijo}"
