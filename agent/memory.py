@@ -1,9 +1,9 @@
 # agent/memory.py — Memoria de conversaciones con SQLite
 import os
-from datetime import datetime
+from datetime import datetime, date
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
-from sqlalchemy import String, Text, DateTime, select, Integer
+from sqlalchemy import String, Text, DateTime, select, Integer, func
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -29,6 +29,22 @@ class Mensaje(Base):
     role: Mapped[str] = mapped_column(String(20))
     content: Mapped[str] = mapped_column(Text)
     timestamp: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class Cliente(Base):
+    __tablename__ = "clientes"
+
+    telefono: Mapped[str] = mapped_column(String(50), primary_key=True)
+    nombre: Mapped[str] = mapped_column(String(200))
+
+
+class Orden(Base):
+    __tablename__ = "ordenes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    telefono: Mapped[str] = mapped_column(String(50), index=True)
+    numero_orden: Mapped[str] = mapped_column(String(30))
+    fecha_creacion: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
 async def inicializar_db():
@@ -74,3 +90,36 @@ async def limpiar_historial(telefono: str):
         for msg in mensajes:
             await session.delete(msg)
         await session.commit()
+
+
+async def guardar_nombre_cliente(telefono: str, nombre: str):
+    async with async_session() as session:
+        cliente = await session.get(Cliente, telefono)
+        if cliente:
+            cliente.nombre = nombre
+        else:
+            cliente = Cliente(telefono=telefono, nombre=nombre)
+            session.add(cliente)
+        await session.commit()
+
+
+async def obtener_nombre_cliente(telefono: str) -> str:
+    async with async_session() as session:
+        cliente = await session.get(Cliente, telefono)
+        return cliente.nombre if cliente else "Sin nombre"
+
+
+async def crear_numero_orden(telefono: str) -> str:
+    hoy = date.today()
+    async with async_session() as session:
+        result = await session.execute(
+            select(func.count(Orden.id)).where(
+                func.date(Orden.fecha_creacion) == hoy
+            )
+        )
+        count = (result.scalar() or 0) + 1
+        numero = f"OC-{hoy.strftime('%Y%m%d')}-{count:03d}"
+        orden = Orden(telefono=telefono, numero_orden=numero, fecha_creacion=datetime.utcnow())
+        session.add(orden)
+        await session.commit()
+        return numero

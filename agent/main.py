@@ -1,13 +1,18 @@
 # agent/main.py — Servidor FastAPI + Webhook de WhatsApp
 import os
+import re
 import logging
 from contextlib import asynccontextmanager
+from datetime import datetime
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import PlainTextResponse
 from dotenv import load_dotenv
 
 from agent.brain import generar_respuesta
-from agent.memory import inicializar_db, guardar_mensaje, obtener_historial
+from agent.memory import (
+    inicializar_db, guardar_mensaje, obtener_historial,
+    guardar_nombre_cliente, obtener_nombre_cliente, crear_numero_orden,
+)
 from agent.providers import obtener_proveedor
 
 load_dotenv()
@@ -22,6 +27,39 @@ PORT = int(os.getenv("PORT", 8000))
 
 # Número que recibe la orden confirmada (mismo que Yape/Plin de la ferretería)
 PAYMENT_PHONE_NUMBER = os.getenv("PAYMENT_PHONE_NUMBER", "")
+
+_PATRON_NOMBRE = re.compile(r'\[CLIENTE_NOMBRE:\s*(.+?)\]')
+_PATRON_ORDEN = re.compile(r'\[ORDEN_CORTE\](.*?)\[/ORDEN_CORTE\]', re.DOTALL)
+
+
+def _limpiar_marcadores(texto: str) -> str:
+    """Elimina marcadores internos antes de enviar al cliente."""
+    texto = _PATRON_NOMBRE.sub('', texto)
+    texto = _PATRON_ORDEN.sub(lambda m: m.group(1).strip(), texto)
+    return texto.strip()
+
+
+def _extraer_cuerpo_orden(respuesta: str) -> str | None:
+    match = _PATRON_ORDEN.search(respuesta)
+    return match.group(1).strip() if match else None
+
+
+def _formatear_orden_ferreteria(cuerpo: str, telefono: str, nombre: str, numero_orden: str) -> str:
+    ahora = datetime.now()
+    hora = ahora.strftime('%I:%M').lstrip('0') or '12'
+    sufijo = 'a.m.' if ahora.hour < 12 else 'p.m.'
+    fecha_str = f"{ahora.strftime('%d/%m/%Y')} {hora} {sufijo}"
+
+    header = (
+        f"📋 ORDEN DE CORTE CONFIRMADA\n\n"
+        f"🆔 Orden: {numero_orden}\n"
+        f"Cliente: {telefono}\n"
+        f"Nombre: {nombre}\n"
+        f"Proveedor: Madecentro Melamine\n\n"
+        f"──────────────────────────\n\n"
+    )
+    footer = f"\n\nFecha de envío: {fecha_str}"
+    return header + cuerpo + footer
 
 
 @asynccontextmanager
@@ -81,26 +119,36 @@ async def webhook_handler(request: Request):
             historial = await obtener_historial(msg.telefono)
             respuesta = await generar_respuesta(texto_procesado, historial)
 
+            # Extraer nombre del cliente si viene en esta respuesta y guardarlo
+            match_nombre = _PATRON_NOMBRE.search(respuesta)
+            if match_nombre:
+                nombre_capturado = match_nombre.group(1).strip()
+                await guardar_nombre_cliente(msg.telefono, nombre_capturado)
+                logger.info(f"Nombre registrado: {nombre_capturado} ({msg.telefono})")
+
+            # Guardar en historial con marcadores (Claude los necesita para recordar contexto)
             await guardar_mensaje(msg.telefono, "user", texto_procesado)
             await guardar_mensaje(msg.telefono, "assistant", respuesta)
 
-            # Enviar respuesta al carpintero
-            await proveedor.enviar_mensaje(msg.telefono, respuesta)
+            # Enviar al carpintero sin marcadores internos
+            respuesta_limpia = _limpiar_marcadores(respuesta)
+            await proveedor.enviar_mensaje(msg.telefono, respuesta_limpia)
 
-            # Si fue pago confirmado, reenviar comprobante + orden a la ferretería
+            # Si fue pago confirmado, reenviar comprobante + orden formateada a la ferretería
             if msg.tiene_media and PAYMENT_PHONE_NUMBER:
-                # 1. Reenviar el comprobante de pago (imagen) para que la ferretería verifique
                 if msg.media_urls:
                     aviso = f"💰 *COMPROBANTE DE PAGO*\nCliente: {msg.telefono}"
                     await proveedor.enviar_mensaje(PAYMENT_PHONE_NUMBER, aviso, media_urls=msg.media_urls)
                     logger.info(f"Comprobante reenviado a ferretería: {PAYMENT_PHONE_NUMBER}")
 
-                # 2. Reenviar la orden de corte confirmada
-                encabezado = f"📋 *ORDEN DE CORTE CONFIRMADA*\nCliente: {msg.telefono}\n\n"
-                await proveedor.enviar_mensaje(PAYMENT_PHONE_NUMBER, encabezado + respuesta)
-                logger.info(f"Orden reenviada a ferretería: {PAYMENT_PHONE_NUMBER}")
+                nombre_cliente = await obtener_nombre_cliente(msg.telefono)
+                numero_orden = await crear_numero_orden(msg.telefono)
+                cuerpo = _extraer_cuerpo_orden(respuesta) or respuesta_limpia
+                orden_formateada = _formatear_orden_ferreteria(cuerpo, msg.telefono, nombre_cliente, numero_orden)
+                await proveedor.enviar_mensaje(PAYMENT_PHONE_NUMBER, orden_formateada)
+                logger.info(f"Orden {numero_orden} enviada a ferretería")
 
-            logger.info(f"Respuesta a {msg.telefono}: {respuesta}")
+            logger.info(f"Respuesta a {msg.telefono}: {respuesta_limpia}")
 
         return {"status": "ok"}
 
