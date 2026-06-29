@@ -87,9 +87,16 @@ async def webhook_handler(request: Request):
             # Enviar respuesta al carpintero
             await proveedor.enviar_mensaje(msg.telefono, respuesta)
 
-            # Si fue pago confirmado, reenviar la orden a la ferretería
+            # Si fue pago confirmado, reenviar comprobante + orden a la ferretería
             if msg.tiene_media and PAYMENT_PHONE_NUMBER:
-                encabezado = f"📋 *PEDIDO CONFIRMADO*\nCliente: {msg.telefono}\n\n"
+                # 1. Reenviar el comprobante de pago (imagen) para que la ferretería verifique
+                if msg.media_urls:
+                    aviso = f"💰 *COMPROBANTE DE PAGO*\nCliente: {msg.telefono}"
+                    await proveedor.enviar_mensaje(PAYMENT_PHONE_NUMBER, aviso, media_urls=msg.media_urls)
+                    logger.info(f"Comprobante reenviado a ferretería: {PAYMENT_PHONE_NUMBER}")
+
+                # 2. Reenviar la orden de corte confirmada
+                encabezado = f"📋 *ORDEN DE CORTE CONFIRMADA*\nCliente: {msg.telefono}\n\n"
                 await proveedor.enviar_mensaje(PAYMENT_PHONE_NUMBER, encabezado + respuesta)
                 logger.info(f"Orden reenviada a ferretería: {PAYMENT_PHONE_NUMBER}")
 

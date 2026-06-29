@@ -1,6 +1,6 @@
 # agent/providers/base.py — Clase base para proveedores de WhatsApp
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from fastapi import Request
 
 
@@ -11,7 +11,8 @@ class MensajeEntrante:
     texto: str
     mensaje_id: str
     es_propio: bool
-    tiene_media: bool = False  # True cuando el mensaje contiene imagen (ej: comprobante de pago)
+    tiene_media: bool = False
+    media_urls: list[str] = field(default_factory=list)  # URLs de imágenes adjuntas
 
 
 class ProveedorWhatsApp(ABC):
@@ -23,8 +24,8 @@ class ProveedorWhatsApp(ABC):
         ...
 
     @abstractmethod
-    async def enviar_mensaje(self, telefono: str, mensaje: str) -> bool:
-        """Envía un mensaje de texto. Retorna True si fue exitoso."""
+    async def enviar_mensaje(self, telefono: str, mensaje: str, media_urls: list[str] | None = None) -> bool:
+        """Envía un mensaje de texto y opcionalmente imágenes. Retorna True si fue exitoso."""
         ...
 
     async def validar_webhook(self, request: Request) -> dict | int | None:
