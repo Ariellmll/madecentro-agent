@@ -21,6 +21,10 @@ build/
 knowledge/*
 !knowledge/.gitkeep
 
+# Archivos generados (excel de órdenes)
+generated/*
+!generated/.gitkeep
+
 # Session state
 config/session.yaml
 

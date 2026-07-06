@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import PlainTextResponse, FileResponse
 from dotenv import load_dotenv
 
 from agent.brain import generar_respuesta
@@ -15,6 +15,7 @@ from agent.memory import (
     guardar_nombre_cliente, obtener_nombre_cliente, crear_numero_orden,
 )
 from agent.providers import obtener_proveedor
+from agent.exportar_excel import generar_excel_orden
 
 load_dotenv()
 
@@ -28,6 +29,9 @@ PORT = int(os.getenv("PORT", 8000))
 
 # Número que recibe la orden confirmada (mismo que Yape/Plin de la ferretería)
 PAYMENT_PHONE_NUMBER = os.getenv("PAYMENT_PHONE_NUMBER", "")
+
+# Dominio público donde Railway sirve /files/{filename} (usado para el link del Excel)
+PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "").rstrip("/")
 
 _ZONA_LIMA = ZoneInfo("America/Lima")
 
@@ -75,6 +79,8 @@ async def lifespan(app: FastAPI):
         logger.info(f"Número de ferretería para pedidos: {PAYMENT_PHONE_NUMBER}")
     else:
         logger.warning("PAYMENT_PHONE_NUMBER no configurado — los pedidos confirmados no se reenviarán")
+    if not PUBLIC_BASE_URL:
+        logger.warning("PUBLIC_BASE_URL no configurado — no se podrá enviar el Excel de la orden por WhatsApp")
     yield
 
 
@@ -96,6 +102,21 @@ async def webhook_verificacion(request: Request):
     if resultado is not None:
         return PlainTextResponse(str(resultado))
     return {"status": "ok"}
+
+
+@app.get("/files/{filename}")
+async def descargar_archivo(filename: str):
+    nombre_seguro = os.path.basename(filename)
+    if nombre_seguro != filename:
+        raise HTTPException(status_code=404, detail="Archivo no encontrado")
+    ruta = os.path.join("generated", nombre_seguro)
+    if not os.path.isfile(ruta):
+        raise HTTPException(status_code=404, detail="Archivo no encontrado")
+    return FileResponse(
+        ruta,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        filename=nombre_seguro,
+    )
 
 
 @app.post("/webhook")
@@ -148,8 +169,29 @@ async def webhook_handler(request: Request):
                 numero_orden = await crear_numero_orden(msg.telefono)
                 cuerpo = _extraer_cuerpo_orden(respuesta) or respuesta_limpia
                 orden_formateada = _formatear_orden_ferreteria(cuerpo, msg.telefono, nombre_cliente, numero_orden)
-                await proveedor.enviar_mensaje(PAYMENT_PHONE_NUMBER, orden_formateada)
+
+                excel_url = None
+                try:
+                    ruta_excel = generar_excel_orden(cuerpo, numero_orden)
+                    if PUBLIC_BASE_URL:
+                        excel_url = f"{PUBLIC_BASE_URL}/files/{os.path.basename(ruta_excel)}"
+                except Exception as e:
+                    logger.error(f"Error generando excel de la orden: {e}")
+
+                await proveedor.enviar_mensaje(
+                    PAYMENT_PHONE_NUMBER, orden_formateada,
+                    media_urls=[excel_url] if excel_url else None,
+                )
                 logger.info(f"Orden {numero_orden} enviada a ferretería")
+
+                if excel_url:
+                    await proveedor.enviar_mensaje(
+                        msg.telefono,
+                        "📎 Aquí tienes tu orden de corte en Excel para descargar.",
+                        media_urls=[excel_url],
+                    )
+                else:
+                    logger.warning("No se pudo generar/enviar el excel de la orden al carpintero (PUBLIC_BASE_URL no configurado o fallo en generación)")
 
             logger.info(f"Respuesta a {msg.telefono}: {respuesta_limpia}")
 
