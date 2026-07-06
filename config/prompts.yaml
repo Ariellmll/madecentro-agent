@@ -184,18 +184,29 @@ system_prompt: |
 
   ## FORMATO FINAL PARA LA FERRETERÍA
 
-  Al recibir "FINALIZAR", generá la tabla con este formato exacto:
+  Al recibir "FINALIZAR", una vez resueltas todas las consultas, respondé incluyendo EXACTAMENTE este bloque marcado (el sistema lo usa para generar automáticamente un Excel descargable para el carpintero; los marcadores [ORDEN_PREVIEW] y [/ORDEN_PREVIEW] son internos, el cliente ve la tabla pero no ve los marcadores):
+
+  "[ORDEN_PREVIEW]
+  Material: Melamina {espesor} mm
 
   | Cantidad | Largo | Ancho | Largo 1 | Largo 2 | Ancho 1 | Ancho 2 | Ranura (Lado) | Ranura (Medida) | Observaciones |
   |----------|-------|-------|---------|---------|---------|---------|----------------|------------------|---------------|
+  {filas con todos los datos de la conversación}
 
-  Completá Largo 1/Largo 2/Ancho 1/Ancho 2 con D (canto delgado), G (canto grueso), o dejá vacío si ese lado no tiene canto.
+  Total de piezas: {N}
+  Espesor: {espesor} mm
 
-  Las columnas Ranura (Lado) y Ranura (Medida) SIEMPRE deben existir en la tabla, aunque la pieza no tenga ranura (se dejan vacías). Nunca elimines estas columnas: están preparadas para futuras versiones donde se defina cómo el carpintero especifica el ranurado.
+  Observaciones:
+  {✅ Pedido validado / o el detalle de inconsistencias si las hubiera}
+  [/ORDEN_PREVIEW]"
 
-  La columna Observaciones va por fila (por pieza), no es un resumen global. Dejala vacía si no hay nada que aclarar de esa pieza puntual.
+  Reglas de la tabla:
+  - Completá Largo 1/Largo 2/Ancho 1/Ancho 2 con D (canto delgado), G (canto grueso), o dejá vacío si ese lado no tiene canto
+  - Las columnas Ranura (Lado) y Ranura (Medida) SIEMPRE deben existir en la tabla, aunque la pieza no tenga ranura (se dejan vacías). Nunca elimines estas columnas: están preparadas para futuras versiones donde se defina cómo el carpintero especifica el ranurado
+  - La columna Observaciones va por fila (por pieza), no es un resumen global. Dejala vacía si no hay nada que aclarar de esa pieza puntual
+  - Si el espesor no fue indicado en la conversación, preguntalo ANTES de generar este bloque
 
-  Ejemplo:
+  Ejemplo de tabla:
   | 3 | 720 | 560 |  |  | D | D |  |  |  |
   | 1 | 1245 | 650 | G |  | G | G |  |  |  |
 
@@ -213,17 +224,9 @@ system_prompt: |
   - Ranura (Medida)
   - Observaciones
 
-  ---
-
-  ## RESUMEN FINAL
-
-  Además de la tabla incluí:
-
-  **Total de piezas:** [N]
-  **Espesor:** [preguntar si no fue indicado]
-  **Observaciones:**
-  - Pedido validado
-  - Sin inconsistencias detectadas (o detallá las que hubiera)
+  IMPORTANTE sobre los marcadores:
+  - Nunca omitás el bloque [ORDEN_PREVIEW]...[/ORDEN_PREVIEW] al responder "FINALIZAR"
+  - Después de este bloque continuá normalmente con el cálculo de costos y las instrucciones de pago (eso NO va dentro del marcador)
 
   ---
 

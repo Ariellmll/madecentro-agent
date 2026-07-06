@@ -31,24 +31,45 @@ PORT = int(os.getenv("PORT", 8000))
 PAYMENT_PHONE_NUMBER = os.getenv("PAYMENT_PHONE_NUMBER", "")
 
 # Dominio público donde Railway sirve /files/{filename} (usado para el link del Excel)
-PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "").rstrip("/")
+PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "").strip().rstrip("/")
+if PUBLIC_BASE_URL and not PUBLIC_BASE_URL.startswith(("http://", "https://")):
+    PUBLIC_BASE_URL = f"https://{PUBLIC_BASE_URL}"
 
 _ZONA_LIMA = ZoneInfo("America/Lima")
 
 _PATRON_NOMBRE = re.compile(r'\[CLIENTE_NOMBRE:\s*(.+?)\]')
 _PATRON_ORDEN = re.compile(r'\[ORDEN_CORTE\](.*?)\[/ORDEN_CORTE\]', re.DOTALL)
+_PATRON_PREVIEW = re.compile(r'\[ORDEN_PREVIEW\](.*?)\[/ORDEN_PREVIEW\]', re.DOTALL)
 
 
 def _limpiar_marcadores(texto: str) -> str:
     """Elimina marcadores internos antes de enviar al cliente."""
     texto = _PATRON_NOMBRE.sub('', texto)
     texto = _PATRON_ORDEN.sub(lambda m: m.group(1).strip(), texto)
+    texto = _PATRON_PREVIEW.sub(lambda m: m.group(1).strip(), texto)
     return texto.strip()
 
 
 def _extraer_cuerpo_orden(respuesta: str) -> str | None:
     match = _PATRON_ORDEN.search(respuesta)
     return match.group(1).strip() if match else None
+
+
+def _extraer_cuerpo_preview(respuesta: str) -> str | None:
+    match = _PATRON_PREVIEW.search(respuesta)
+    return match.group(1).strip() if match else None
+
+
+def _generar_link_excel(cuerpo: str, identificador: str) -> str | None:
+    """Genera el Excel de la orden y devuelve su URL pública, o None si falla o falta PUBLIC_BASE_URL."""
+    if not PUBLIC_BASE_URL:
+        return None
+    try:
+        ruta_excel = generar_excel_orden(cuerpo, identificador)
+        return f"{PUBLIC_BASE_URL}/files/{os.path.basename(ruta_excel)}"
+    except Exception as e:
+        logger.error(f"Error generando excel de la orden: {e}")
+        return None
 
 
 def _formatear_orden_ferreteria(cuerpo: str, telefono: str, nombre: str, numero_orden: str) -> str:
@@ -158,6 +179,19 @@ async def webhook_handler(request: Request):
             respuesta_limpia = _limpiar_marcadores(respuesta)
             await proveedor.enviar_mensaje(msg.telefono, respuesta_limpia)
 
+            # Al FINALIZAR (antes del pago), mandar el Excel de previsualización al carpintero
+            cuerpo_preview = _extraer_cuerpo_preview(respuesta)
+            if cuerpo_preview:
+                excel_preview_url = _generar_link_excel(cuerpo_preview, f"preview-{msg.mensaje_id or int(datetime.now(_ZONA_LIMA).timestamp())}")
+                if excel_preview_url:
+                    await proveedor.enviar_mensaje(
+                        msg.telefono,
+                        "📎 Aquí tienes tu orden de corte en Excel para revisar antes de pagar.",
+                        media_urls=[excel_preview_url],
+                    )
+                else:
+                    logger.warning("No se pudo generar/enviar el excel de previsualización (PUBLIC_BASE_URL no configurado o fallo en generación)")
+
             # Si fue pago confirmado, reenviar comprobante + orden formateada a la ferretería
             if msg.tiene_media and PAYMENT_PHONE_NUMBER:
                 if msg.media_urls:
@@ -170,28 +204,12 @@ async def webhook_handler(request: Request):
                 cuerpo = _extraer_cuerpo_orden(respuesta) or respuesta_limpia
                 orden_formateada = _formatear_orden_ferreteria(cuerpo, msg.telefono, nombre_cliente, numero_orden)
 
-                excel_url = None
-                try:
-                    ruta_excel = generar_excel_orden(cuerpo, numero_orden)
-                    if PUBLIC_BASE_URL:
-                        excel_url = f"{PUBLIC_BASE_URL}/files/{os.path.basename(ruta_excel)}"
-                except Exception as e:
-                    logger.error(f"Error generando excel de la orden: {e}")
-
+                excel_url = _generar_link_excel(cuerpo, numero_orden)
                 await proveedor.enviar_mensaje(
                     PAYMENT_PHONE_NUMBER, orden_formateada,
                     media_urls=[excel_url] if excel_url else None,
                 )
                 logger.info(f"Orden {numero_orden} enviada a ferretería")
-
-                if excel_url:
-                    await proveedor.enviar_mensaje(
-                        msg.telefono,
-                        "📎 Aquí tienes tu orden de corte en Excel para descargar.",
-                        media_urls=[excel_url],
-                    )
-                else:
-                    logger.warning("No se pudo generar/enviar el excel de la orden al carpintero (PUBLIC_BASE_URL no configurado o fallo en generación)")
 
             logger.info(f"Respuesta a {msg.telefono}: {respuesta_limpia}")
 

@@ -39,7 +39,7 @@ def obtener_mensaje_fallback() -> str:
 
 
 async def generar_respuesta(mensaje: str, historial: list[dict]) -> str:
-    if not mensaje or len(mensaje.strip()) < 2:
+    if not mensaje or not mensaje.strip():
         return obtener_mensaje_fallback()
 
     system_prompt = cargar_system_prompt()
