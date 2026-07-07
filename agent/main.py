@@ -15,7 +15,8 @@ from agent.memory import (
     guardar_nombre_cliente, obtener_nombre_cliente, crear_numero_orden,
 )
 from agent.providers import obtener_proveedor
-from agent.exportar_excel import generar_excel_orden
+from agent.exportar_excel import generar_excel_orden, _parsear_tabla
+from agent.tools import calcular_planchas_necesarias, calcular_costo_pedido, piezas_desde_filas
 
 load_dotenv()
 
@@ -70,6 +71,34 @@ def _generar_link_excel(cuerpo: str, identificador: str) -> str | None:
     except Exception as e:
         logger.error(f"Error generando excel de la orden: {e}")
         return None
+
+
+def _formatear_cotizacion(planchas: int, costo: dict) -> str:
+    """Arma el mensaje de material + cotización + instrucciones de pago.
+
+    El cálculo se hace en Python (nesting real + tarifas), nunca lo estima Claude,
+    para evitar que el LLM invente cantidades de planchas o costos.
+    """
+    canteado = costo["costo_canto_delgado"] + costo["costo_canto_grueso"]
+
+    mensaje = (
+        f"📦 Material\n\n"
+        f"Planchas requeridas: {planchas}\n\n"
+        f"💰 Resumen económico\n\n"
+        f"Melamina\n"
+        f"Planchas requeridas: {planchas}\n"
+        f"Precio por plancha: S/ {costo['precio_plancha']:.2f}\n"
+        f"Costo melamina: S/ {costo['costo_melamina']:.2f}\n\n"
+        f"Cortes: S/ {costo['costo_cortes']:.2f}\n"
+        f"Canteado: S/ {canteado:.2f}\n"
+        f"Ranurado: S/ {costo['costo_ranurado']:.2f}\n"
+        f"────────────────\n"
+        f"TOTAL: S/ {costo['total_estimado']:.2f}\n\n"
+        f"💡 Este costo es referencial. El precio final puede variar según tipo de canto, espesor, color y servicio adicional.\n\n"
+        f"Para confirmar tu pedido realizá el pago por *Yape* o *Plin* al número *{PAYMENT_PHONE_NUMBER}* y enviame la captura de pantalla del comprobante.\n\n"
+        f"Una vez recibida la captura, generaré la orden de corte confirmada y la enviaré a la ferretería. ✅"
+    )
+    return mensaje
 
 
 def _formatear_orden_ferreteria(cuerpo: str, telefono: str, nombre: str, numero_orden: str) -> str:
@@ -191,6 +220,15 @@ async def webhook_handler(request: Request):
                     )
                 else:
                     logger.warning("No se pudo generar/enviar el excel de previsualización (PUBLIC_BASE_URL no configurado o fallo en generación)")
+
+                # Nesting de planchas + cotización — se calculan en Python, nunca los estima Claude
+                piezas = piezas_desde_filas(_parsear_tabla(cuerpo_preview))
+                if piezas:
+                    planchas = calcular_planchas_necesarias(piezas)["planchas"]
+                    costo = calcular_costo_pedido(piezas, numero_planchas=planchas)
+                    await proveedor.enviar_mensaje(msg.telefono, _formatear_cotizacion(planchas, costo))
+                else:
+                    logger.warning("No se pudieron parsear piezas de la tabla de preview para cotizar")
 
             # Si fue pago confirmado, reenviar comprobante + orden formateada a la ferretería
             if msg.tiene_media and PAYMENT_PHONE_NUMBER:
